@@ -3,15 +3,16 @@ import json
 import os
 import random
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import PIL.Image
 from PIL import UnidentifiedImageError
 
 from astrbot.api import AstrBotConfig, logger
-from astrbot.api.event import AstrMessageEvent, filter
-from astrbot.api.message_components import At, Image, Node, Nodes, Plain
+from astrbot.api.event import AstrMessageEvent, filter, MessageChain
+from astrbot.api.message_components import Image, Node, Nodes, Plain
 from astrbot.api.star import Context, Star, register
+from astrbot.core.utils.session_waiter import SessionFilter
 
 from .persona import PERSONA
 
@@ -593,6 +594,173 @@ class Tarot:
             logger.error(f"判断占卜方式失败: {e}")
             return False
 
+    def _get_private_umo(self, event: AstrMessageEvent) -> str:
+        """从当前事件构造对应的私聊 UMO。"""
+        umo = event.unified_msg_origin
+        user_id = event.get_sender_id()
+        parts = umo.split(":")
+        if len(parts) >= 3:
+            msg_type = parts[1]
+            if "Group" in msg_type:
+                parts[1] = msg_type.replace("Group", "Friend")
+            elif "Friend" not in msg_type:
+                return umo
+            parts[2] = user_id
+            return ":".join(parts[:3])
+        return umo
+
+    async def _send_to_umo(self, umo: str, text: str = "", image_path: str = "") -> None:
+        """向指定 UMO 发送主动消息。"""
+        components = []
+        if text:
+            components.append(Plain(text))
+        if image_path:
+            components.append(Image.fromFileSystem(image_path))
+        if not components:
+            return
+        try:
+            await self.context.send_message(umo, MessageChain(components))
+        except Exception as e:
+            logger.error(f"向 {umo} 发送消息失败: {e}")
+
+    async def _generate_conversational_interpretation(
+        self,
+        formation_name: str,
+        cards_info: List[Dict],
+        representations: List[str],
+        is_upright_list: List[bool],
+        history: List[Dict[str, str]],
+        event: AstrMessageEvent,
+    ) -> str:
+        """生成对话式、结合上下文的占卜解读。"""
+        history_text = self._format_history(history)
+        sender_name = ""
+        try:
+            sender_name = event.get_sender_name() or ""
+        except Exception:
+            sender_name = ""
+
+        cards_text = ""
+        for i, (card, rep, is_upright) in enumerate(
+            zip(cards_info, representations, is_upright_list)
+        ):
+            cards_text += (
+                f"第{i+1}张牌「{rep}」："
+                f"「{card['name_cn']}{'正位' if is_upright else '逆位'}」"
+                f"— {card['meaning']['up' if is_upright else 'down']}\n"
+            )
+
+        prompt = (
+            f"你刚刚和{sender_name if sender_name else '来访者'}聊了一会儿，"
+            "现在要为对方抽到的牌给出解读。\n\n"
+            f"你们的对话历史：\n{history_text}\n\n"
+            f"牌阵：{formation_name}\n"
+            f"抽到的牌：\n{cards_text}\n"
+            "请像延续这场私密对话一样，用慵懒、妩媚、温柔而危险的语气给出解读。\n"
+            "不要像正式报告那样分点列举，要自然地把牌意融入对话中，仿佛姐姐在耳边低语。\n"
+            "可以调侃、挑逗、安慰对方，称呼对方名字或昵称，使用~、…、🌙、✨、🍷、💋、🖤、🦊、🌹等符号。\n"
+            "回答约200-300字，直接输出要发送给对方的内容。"
+        )
+        try:
+            return await self._call_llm(
+                event,
+                prompt=prompt,
+                system_prompt=PERSONA + " 你正在延续一场私密的塔罗对话。",
+            )
+        except Exception as e:
+            logger.error(f"生成对话式解读失败: {e}")
+            return "抱歉，姐姐这次没看准…可以再抽一次吗？🌙"
+
+    async def _sister_divination(
+        self,
+        event: AstrMessageEvent,
+        history: List[Dict[str, str]],
+        use_formation: bool,
+    ) -> None:
+        """在薇拉私聊模式中，以对话方式完成占卜并自然呈现结果。"""
+        theme = self.pick_theme()
+        with open(self.tarot_json, "r", encoding="utf-8") as f:
+            content = json.load(f)
+            all_cards = content.get("cards")
+            all_formations = content.get("formations")
+
+        summary = await self._summarize_conversation(event, history)
+
+        if use_formation:
+            formation_name = await self._match_formation(summary, all_formations, event)
+            formation = all_formations.get(formation_name)
+            cards_num = formation.get("cards_num")
+            is_cut = formation.get("is_cut")
+            representations = self._validate_formation(formation, formation_name)
+            cards_info_list = self._random_cards(all_cards, theme, cards_num)
+
+            await event.send(
+                event.plain_result(
+                    f"🌙 嗯…姐姐听懂了，你的灵魂比表面看起来更纠缠呢。\n"
+                    f"{summary}\n\n"
+                    f"让姐姐铺开牌阵，看看命运究竟想对你说什么…"
+                )
+            )
+
+            is_upright_list = []
+            for i in range(cards_num):
+                flag, text, img_path, is_upright = await self._get_text_and_image(
+                    theme, cards_info_list[i]
+                )
+                if not flag:
+                    await event.send(event.plain_result(text))
+                    return
+                is_upright_list.append(is_upright)
+                header = (
+                    f"切牌「{representations[i]}」\n"
+                    if (is_cut and i == cards_num - 1)
+                    else f"第{i+1}张牌「{representations[i]}」\n"
+                )
+                await event.send(event.plain_result(header + text))
+                if img_path:
+                    await event.send(event.image_result(img_path))
+                if i < cards_num - 1:
+                    await asyncio.sleep(2)
+
+            interpretation = await self._generate_conversational_interpretation(
+                formation_name,
+                cards_info_list,
+                representations,
+                is_upright_list,
+                history,
+                event,
+            )
+            await event.send(event.plain_result(interpretation))
+        else:
+            cards_info_list = self._random_cards(all_cards, theme, 1)
+            flag, text, img_path, is_upright = await self._get_text_and_image(
+                theme, cards_info_list[0]
+            )
+            if not flag:
+                await event.send(event.plain_result(text))
+                return
+
+            await event.send(
+                event.plain_result(
+                    f"🌙 姐姐明白了，你的心思其实很清楚。\n"
+                    f"{summary}\n\n"
+                    f"那么，就让这一张牌，替你拨开眼前的迷雾吧…"
+                )
+            )
+            await event.send(event.plain_result("回应是" + text))
+            if img_path:
+                await event.send(event.image_result(img_path))
+
+            interpretation = await self._generate_conversational_interpretation(
+                "单张牌占卜",
+                cards_info_list,
+                ["当前情况"],
+                [is_upright],
+                history,
+                event,
+            )
+            await event.send(event.plain_result(interpretation))
+
     async def sister_divine(self, event: AstrMessageEvent):
         """薇拉模式：持续引导对话，最后进行专属占卜。"""
         try:
@@ -605,13 +773,21 @@ class Tarot:
             yield event.plain_result("当前 AstrBot 版本不支持薇拉模式，请升级后重试。")
             return
 
+        private_umo = self._get_private_umo(event)
+        is_from_group = event.get_group_id() is not None
+
+        if is_from_group:
+            yield event.plain_result(
+                "小家伙，这里人多耳杂，姐姐带你去安静的角落慢慢说~ 🌙"
+            )
+
         opening = (
             "🌙 叮咚——午夜钟声敲响，「月蚀之匣」的门为你而开。\n"
             "我是薇拉姐姐，这间塔罗馆的主人。\n"
             "别紧张，小家伙…把你迷路的心事，慢慢说给姐姐听。\n"
             "等你说够了，姐姐再为你揭开命运的牌面。"
         )
-        yield event.plain_result(opening)
+        await self._send_to_umo(private_umo, opening)
 
         rules = (
             "📝 规则说明：\n"
@@ -620,14 +796,14 @@ class Tarot:
             "• 发送「退出」→ 离开塔罗馆，不占卜\n"
             "• 5分钟不说话 → 姐姐会以为你睡着了，自动关门哦~"
         )
-        yield event.plain_result(rules)
+        await self._send_to_umo(private_umo, rules)
 
         history: List[Dict[str, str]] = []
         max_rounds = 8
-        user_id = event.get_sender_id()
 
-        def _at_msg(text: str):
-            return event.chain_result([At(qq=user_id), Plain(" " + text)])
+        class PrivateSessionFilter(SessionFilter):
+            def filter(self, event: AstrMessageEvent) -> str:
+                return event.unified_msg_origin
 
         @session_waiter(timeout=300, record_history_chains=False)
         async def sister_waiter(controller: SessionController, event: AstrMessageEvent):
@@ -636,7 +812,7 @@ class Tarot:
 
             if user_msg == "退出":
                 await event.send(
-                    _at_msg(
+                    event.plain_result(
                         "这么着急要走吗，小家伙？\n"
                         "「月蚀之匣」的门永远为你留着…下次再来找姐姐倾诉吧，晚安~🌙"
                     )
@@ -652,48 +828,32 @@ class Tarot:
             )
 
             if should_divine:
-                summary = await self._summarize_conversation(event, history)
                 use_formation = await self._should_use_formation(event, history)
-
-                if use_formation:
-                    await event.send(
-                        _at_msg(
-                            f"🌙 嗯…姐姐听懂了，你的灵魂比表面看起来更纠缠呢。\n"
-                            f"{summary}\n\n"
-                            f"让姐姐铺开牌阵，看看命运究竟想对你说什么…"
-                        )
-                    )
-                    async for result in self.divine(event, summary, skip_ai=False):
-                        await event.send(result)
-                else:
-                    await event.send(
-                        _at_msg(
-                            f"🌙 姐姐明白了，你的心思其实很清楚。\n"
-                            f"{summary}\n\n"
-                            f"那么，就让这一张牌，替你拨开眼前的迷雾吧…"
-                        )
-                    )
-                    async for result in self.onetime_divine(event, summary, skip_ai=False):
-                        await event.send(result)
+                await self._sister_divination(event, history, use_formation)
                 controller.stop()
                 return
 
             history.append({"role": "user", "content": user_msg})
             guidance = await self._generate_sister_guidance(event, history)
             history.append({"role": "assistant", "content": guidance})
-            await event.send(_at_msg(guidance))
+            await event.send(event.plain_result(guidance))
             controller.keep(timeout=300, reset_timeout=True)
 
+        original_umo = event.unified_msg_origin
+        event.unified_msg_origin = private_umo
         try:
-            await sister_waiter(event)
+            await sister_waiter(event, session_filter=PrivateSessionFilter())
         except TimeoutError:
-            yield event.plain_result(
+            await self._send_to_umo(
+                private_umo,
                 "小家伙沉默了好久呢…是害羞，还是不知道该怎么说？\n"
-                "「月蚀之匣」的烛光熄灭了，但姐姐还在。下次想好了，再来找姐姐吧~🌙"
+                "「月蚀之匣」的烛光熄灭了，但姐姐还在。下次想好了，再来找姐姐吧~🌙",
             )
         except Exception as e:
             logger.error(f"薇拉模式出错: {e}")
-            yield event.plain_result(f"薇拉模式出错: {e}")
+            await self._send_to_umo(private_umo, f"薇拉模式出错: {e}")
+        finally:
+            event.unified_msg_origin = original_umo
 
     async def terminate(self):
         """插件卸载/停用时可选清理运行时生成的旋转图片缓存。"""
@@ -719,15 +879,15 @@ class Tarot:
 
 
 HELP_TEXT = (
-    "赛博塔罗牌 v0.4.6\n"
+    "赛博塔罗牌 v0.5.0\n"
     "[占卜] 随机选取牌阵进行占卜并提供 AI 解析，可附加关键词（如 '占卜 情感'）匹配牌阵\n"
     "[塔罗牌] 得到单张塔罗牌回应及 AI 解析\n"
-    "[薇拉/玫瑰小姐/玫瑰姐姐/薇拉姐姐/占卜师] 唤出薇拉姐姐，进入持续引导对话，聊完后进行专属占卜\n"
+    "[薇拉/玫瑰小姐/玫瑰姐姐/薇拉姐姐/占卜师] 唤出薇拉姐姐，自动转入私聊进行持续引导对话，聊完后进行专属占卜\n"
     "[开启转发 / 关闭转发] 切换群聊转发模式"
 )
 
 
-@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.4.6")
+@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.5.0")
 class TarotPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
