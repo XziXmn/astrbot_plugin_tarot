@@ -3,7 +3,7 @@ display_name: 赛博塔罗牌
 short_desc: 基于 AstrBot 的多牌阵塔罗占卜插件，支持 AI 解析。
 desc: 一个基于 AstrBot 框架的塔罗牌占卜插件，支持多牌阵和单张牌占卜，并通过 AI 生成详细解析。
 help: "[占卜] 随机选取牌阵进行占卜并提供 AI 解析，可根据用户输入（如“占卜 情感”）模糊匹配或通过 AI 选择合适的牌阵（如“圣三角牌阵”），随机抽取对应数量的塔罗牌，并生成带颜表情的 AI 解析。[塔罗牌] 抽取一张塔罗牌，提供简短回应和 AI 解析，适合快速占卜。[薇拉/玫瑰小姐/玫瑰姐姐/薇拉姐姐/占卜师] 唤出薇拉姐姐，进入持续引导对话，聊完后进行专属占卜。[开启转发 / 关闭转发] 切换群聊转发模式。"
-version: v0.3.6
+version: v0.3.7
 author: XziXmn
 repo: https://github.com/XziXmn/astrbot_plugin_tarot
 astrbot_version: ">=4.5.7"
