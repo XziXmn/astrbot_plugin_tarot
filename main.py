@@ -240,6 +240,23 @@ class Tarot:
         else:
             theme_hint = "来访者没有给出特别具体的主题，请给出通用但贴合牌面的解读。"
 
+        sender_name = ""
+        try:
+            sender_name = event.get_sender_name() or ""
+        except Exception:
+            sender_name = ""
+
+        if sender_name and sender_name.strip():
+            name_hint = (
+                f"对方的名字是「{sender_name.strip()}」。"
+                f"请在解读中自然地用「{sender_name.strip()}」称呼对方，"
+                "也可以穿插使用「小家伙」「小可怜」「我的小迷路鬼」「乖孩子」「小骗子」「害羞鬼」等昵称。"
+            )
+        else:
+            name_hint = (
+                "称呼对方为「小家伙」「小可怜」「我的小迷路鬼」「乖孩子」「小骗子」「害羞鬼」等。"
+            )
+
         prompt = (
             "一位来访者坐在你的塔罗馆里，向你寻求指引。\n"
             f"{theme_hint}\n"
@@ -247,8 +264,8 @@ class Tarot:
             "你的解读要慵懒、妩媚、温柔而危险，像狐狸一样狡黠，"
             "可以时不时轻轻调侃或挑逗来访者，比如调侃对方的紧张、害羞或嘴硬，"
             "但要保持优雅与分寸，让对方感到被吸引而不是被冒犯。\n"
-            "善用~、…、🌙、✨、🍷、💋、🖤、🦊、🌹等符号，"
-            "称呼对方为「小家伙」「小可怜」「我的小迷路鬼」「乖孩子」「小骗子」「害羞鬼」等。\n"
+            "善用~、…、🌙、✨、🍷、💋、🖤、🦊、🌹等符号，\n"
+            f"{name_hint}\n"
             "回答约200-300字，解释这些牌可能对来访者生活、情感或决策的启示。\n\n"
         )
         prompt += f"牌阵：{formation_name}\n"
@@ -702,7 +719,7 @@ class Tarot:
 
 
 HELP_TEXT = (
-    "赛博塔罗牌 v0.4.5\n"
+    "赛博塔罗牌 v0.4.6\n"
     "[占卜] 随机选取牌阵进行占卜并提供 AI 解析，可附加关键词（如 '占卜 情感'）匹配牌阵\n"
     "[塔罗牌] 得到单张塔罗牌回应及 AI 解析\n"
     "[薇拉/玫瑰小姐/玫瑰姐姐/薇拉姐姐/占卜师] 唤出薇拉姐姐，进入持续引导对话，聊完后进行专属占卜\n"
@@ -710,7 +727,7 @@ HELP_TEXT = (
 )
 
 
-@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.4.5")
+@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.4.6")
 class TarotPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
