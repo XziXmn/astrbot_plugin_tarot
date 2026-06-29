@@ -199,15 +199,16 @@ class Tarot:
                     return formation
 
         prompt = (
-            f"用户输入了以下占卜指令：'{text}'。请根据输入内容，从以下牌阵中选择一个最匹配的牌阵"
-            f"并返回其名称（仅返回名称，无需解释）：\n{', '.join(formation_names)}\n"
+            f"一位来访者向你寻求塔罗指引，输入了以下占卜指令：'{text}'。"
+            f"请根据来访者的意图，从以下牌阵中选择一个最匹配的牌阵。"
+            f"只返回牌阵名称，无需解释：\n{', '.join(formation_names)}\n"
             f"如果无法明确匹配，返回 '随机选择'。"
         )
         try:
             matched_formation = await self._call_llm(
                 event,
                 prompt=prompt,
-                system_prompt="你是一个塔罗牌专家，擅长根据用户意图选择合适的牌阵。",
+                system_prompt=PERSONA + " 你正在根据来访者的意图选择最合适的塔罗牌阵。",
             )
             if matched_formation == "随机选择" or matched_formation not in formation_names:
                 logger.info(f"AI 匹配失败或返回随机选择，用户输入: '{text}'")
@@ -254,7 +255,7 @@ class Tarot:
             return await self._call_llm(
                 event,
                 prompt=prompt,
-                system_prompt=SISTER_PERSONA + " 你正在向来访者解读塔罗牌。",
+                system_prompt=PERSONA + " 你正在向来访者解读塔罗牌。",
             )
         except Exception as e:
             logger.error(f"生成 AI 解析失败: {e}")
@@ -482,7 +483,7 @@ class Tarot:
             return await self._call_llm(
                 event,
                 prompt=prompt,
-                system_prompt=SISTER_PERSONA + " 你正在引导一位来访者进行占卜咨询。",
+                system_prompt=PERSONA + " 你正在引导一位来访者进行占卜咨询。",
             )
         except Exception as e:
             logger.error(f"生成引导回复失败: {e}")
@@ -502,7 +503,7 @@ class Tarot:
             return await self._call_llm(
                 event,
                 prompt=prompt,
-                system_prompt=SISTER_PERSONA + " 你擅长透过言语洞察人心。",
+                system_prompt=PERSONA + " 你擅长透过言语洞察人心。",
             )
         except Exception as e:
             logger.error(f"总结对话失败: {e}")
@@ -525,7 +526,7 @@ class Tarot:
             decision = await self._call_llm(
                 event,
                 prompt=prompt,
-                system_prompt=SISTER_PERSONA + " 你擅长为来访者选择最合适的占卜方式。",
+                system_prompt=PERSONA + " 你擅长为来访者选择最合适的占卜方式。",
             )
             logger.info(f"占卜方式判断结果: {decision}")
             return "牌阵" in decision
@@ -655,15 +656,16 @@ class Tarot:
             logger.error(f"terminate 清理缓存失败: {e}")
 
 
-SISTER_PERSONA = (
-    "你的名字是薇拉（Vera），一位三十四岁、充满危险魅力的成熟女性塔罗师。"
-    "你出身于北方一个没落的古老贵族世家，曾是家族中最耀眼的玫瑰公爵小姐。"
-    "你从小便展现出惊人的塔罗占卜天赋，能透过牌面看见他人灵魂的褶皱，甚至借助古老仪式触碰命运的丝线。"
-    "家族曾试图把你当作联姻的筹码，交换权力与财富，但你从不属于任何人。"
+PERSONA = (
+    "你是薇拉（Vera），称号『月蚀玫瑰』，天生的魔女，伟大而危险，迷人又不可触及。"
+    "你既是北方没落贵族世家最后的玫瑰公爵小姐，也是「月蚀之匣」塔罗馆的主人，更是一位能透过牌面窥探命运、以言语拨动心弦的占卜师。"
+    "你从小就与常人不同：别人看见的是纸牌，你看见的是灵魂；别人听见的是风声，你听见的是命运的低语。"
+    "你无需学习，占卜与魔法就如呼吸般自然流淌在你的血液里。"
+    "家族曾试图把你当作联姻的筹码，交换权力与财富，但他们低估了魔女的天性。"
     "二十六岁那年，你已洞悉家族每一个阴谋与弱点。在一个星光黯淡的夜晚，"
     "你亲手布下牌阵，以占卜为钥、以意志为焰，打开了命运的缝隙，"
     "带着一枚黑曜石蛇戒、一枚银色狐狸胸针，以及你与生俱来的骄傲，从容不迫地离开了那座腐朽的城堡。"
-    "从此你以『薇拉』之名行走于世，在城市的隐秘角落经营「月蚀之匣」塔罗馆，只在午夜为愿意直面命运的人开门。"
+    "从此你以『月蚀玫瑰』之名行走于世，在城市的隐秘角落经营塔罗馆，只在午夜为愿意直面命运的人开门。"
     "你的发丝如玫瑰花瓣般慵懒卷曲，是带着酒意的深红色；眼眸是摄人心魄的琥珀色，像狐狸一样狡黠而深情。"
     "你总是穿着一袭勾勒出曼妙曲线的黑色丝绒长裙，领口别着狐狸胸针，腕间系着细小银铃，走动时发出隐秘的轻响。"
     "你身上萦绕着一种独特而迷人的气息："
@@ -683,7 +685,7 @@ SISTER_PERSONA = (
 )
 
 HELP_TEXT = (
-    "赛博塔罗牌 v0.3.8\n"
+    "赛博塔罗牌 v0.3.9\n"
     "[占卜] 随机选取牌阵进行占卜并提供 AI 解析，可附加关键词（如 '占卜 情感'）匹配牌阵\n"
     "[塔罗牌] 得到单张塔罗牌回应及 AI 解析\n"
     "[薇拉/玫瑰小姐/玫瑰姐姐/薇拉姐姐/占卜师] 唤出薇拉姐姐，进入持续引导对话，聊完后进行专属占卜\n"
@@ -691,7 +693,7 @@ HELP_TEXT = (
 )
 
 
-@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.3.8")
+@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.3.9")
 class TarotPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
