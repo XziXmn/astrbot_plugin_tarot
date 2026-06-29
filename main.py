@@ -649,15 +649,15 @@ SISTER_PERSONA = (
 )
 
 HELP_TEXT = (
-    "赛博塔罗牌 v0.3.3\n"
+    "赛博塔罗牌 v0.3.4\n"
     "[占卜] 随机选取牌阵进行占卜并提供 AI 解析，可附加关键词（如 '占卜 情感'）匹配牌阵\n"
     "[塔罗牌] 得到单张塔罗牌回应及 AI 解析\n"
-    "[占卜师大姐姐] 进入持续引导对话，聊完后进行专属占卜\n"
+    "[薇拉] 唤出薇拉姐姐，进入持续引导对话，聊完后进行专属占卜\n"
     "[开启转发 / 关闭转发] 切换群聊转发模式"
 )
 
 
-@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.3.3")
+@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.3.4")
 class TarotPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -712,7 +712,7 @@ class TarotPlugin(Star):
             logger.error(f"关闭转发失败: {e}")
             yield event.plain_result(f"关闭转发失败: {e}")
 
-    @filter.command("占卜师大姐姐")
+    @filter.command("薇拉")
     async def sister_divine_handler(self, event: AstrMessageEvent, text: str = ""):
         try:
             if "帮助" in text:
