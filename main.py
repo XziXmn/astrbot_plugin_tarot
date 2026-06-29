@@ -443,6 +443,115 @@ class Tarot:
         logger.info(f"群聊转发模式已切换为: {new_state}")
         return "占卜群聊转发模式已开启~" if new_state else "占卜群聊转发模式已关闭~"
 
+    @staticmethod
+    def _format_history(history: List[Dict[str, str]]) -> str:
+        return "\n".join(
+            f"{'用户' if h['role'] == 'user' else '占卜师大姐姐'}：{h['content']}"
+            for h in history
+        )
+
+    async def _generate_sister_guidance(
+        self, event: AstrMessageEvent, history: List[Dict[str, str]]
+    ) -> str:
+        history_text = self._format_history(history)
+        prompt = (
+            "你是一位温柔成熟的占卜师大姐姐。用户正在向你倾诉烦恼，"
+            "你希望通过轻松的对话引导用户敞开心扉。\n"
+            "请根据对话历史，用温柔、亲切、带颜表情的语气回复用户，"
+            "回复控制在100字以内。不要直接给出占卜结果，只是继续引导对话。\n\n"
+            f"对话历史：\n{history_text}\n\n请直接回复用户。"
+        )
+        try:
+            return await self._call_llm(
+                event,
+                prompt=prompt,
+                system_prompt="你是温柔成熟的占卜师大姐姐，擅长倾听和引导。",
+            )
+        except Exception as e:
+            logger.error(f"生成引导回复失败: {e}")
+            return "嗯~ 可以再说得具体一些吗？😊"
+
+    async def _summarize_conversation(
+        self, event: AstrMessageEvent, history: List[Dict[str, str]]
+    ) -> str:
+        history_text = self._format_history(history)
+        prompt = (
+            "你是一位占卜师大姐姐。请根据以下与用户的对话，"
+            "总结用户的烦恼、问题和期望，用于后续的塔罗牌占卜。"
+            "总结控制在100字以内，保留关键信息。\n\n"
+            f"对话历史：\n{history_text}\n\n请输出总结。"
+        )
+        try:
+            return await self._call_llm(
+                event,
+                prompt=prompt,
+                system_prompt="你是专业的占卜师大姐姐，擅长总结用户诉求。",
+            )
+        except Exception as e:
+            logger.error(f"总结对话失败: {e}")
+            return "用户有一些烦恼想要占卜"
+
+    async def sister_divine(self, event: AstrMessageEvent):
+        """占卜师大姐姐模式：持续引导对话，最后进行专属占卜。"""
+        try:
+            from astrbot.core.utils.session_waiter import (
+                SessionController,
+                session_waiter,
+            )
+        except ImportError as e:
+            logger.error(f"当前 AstrBot 版本不支持会话控制: {e}")
+            yield event.plain_result("当前 AstrBot 版本不支持占卜师大姐姐模式，请升级后重试。")
+            return
+
+        opening = (
+            "🔮 欢迎来到占卜师大姐姐模式~\n"
+            "我会先陪你聊聊，听听你的烦恼，聊完后再为你进行一次专属占卜。\n"
+            "随时发送「开始占卜」让我抽牌，发送「退出」可结束对话。"
+        )
+        yield event.plain_result(opening)
+
+        history: List[Dict[str, str]] = []
+        max_rounds = 5
+
+        @session_waiter(timeout=300, record_history_chains=False)
+        async def sister_waiter(controller: SessionController, event: AstrMessageEvent):
+            nonlocal history
+            user_msg = event.message_str.strip()
+
+            if user_msg == "退出":
+                await event.send(event.plain_result("已退出占卜师大姐姐模式，期待下次再见~"))
+                controller.stop()
+                return
+
+            should_divine = (
+                user_msg == "开始占卜"
+                or len([h for h in history if h["role"] == "user"]) >= max_rounds
+            )
+
+            if should_divine:
+                summary = await self._summarize_conversation(event, history)
+                await event.send(
+                    event.plain_result(f"💫 我了解了你的情况：\n{summary}\n\n现在为你进行专属占卜...")
+                )
+                async for result in self.onetime_divine(event, summary):
+                    await event.send(result)
+                controller.stop()
+                return
+
+            history.append({"role": "user", "content": user_msg})
+            guidance = await self._generate_sister_guidance(event, history)
+            history.append({"role": "assistant", "content": guidance})
+            await event.send(event.plain_result(guidance))
+            controller.keep(timeout=300, reset_timeout=True)
+
+        try:
+            await sister_waiter(event)
+        except TimeoutError:
+            yield event.plain_result("占卜师大姐姐等太久啦，会话已结束~")
+        except Exception as e:
+            logger.error(f"占卜师大姐姐模式出错: {e}")
+            yield event.plain_result(f"占卜师大姐姐模式出错: {e}")
+
     async def terminate(self):
         """插件卸载/停用时可选清理运行时生成的旋转图片缓存。"""
         try:
@@ -467,14 +576,15 @@ class Tarot:
 
 
 HELP_TEXT = (
-    "赛博塔罗牌 v0.2.0\n"
+    "赛博塔罗牌 v0.3.0\n"
     "[占卜] 随机选取牌阵进行占卜并提供 AI 解析，可附加关键词（如 '占卜 情感'）匹配牌阵\n"
     "[塔罗牌] 得到单张塔罗牌回应及 AI 解析\n"
+    "[占卜师大姐姐] 进入持续引导对话，聊完后进行专属占卜\n"
     "[开启转发 / 关闭转发] 切换群聊转发模式"
 )
 
 
-@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.2.0")
+@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.3.0")
 class TarotPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -528,3 +638,16 @@ class TarotPlugin(Star):
         except Exception as e:
             logger.error(f"关闭转发失败: {e}")
             yield event.plain_result(f"关闭转发失败: {e}")
+
+    @filter.command("占卜师大姐姐")
+    async def sister_divine_handler(self, event: AstrMessageEvent, text: str = ""):
+        try:
+            if "帮助" in text:
+                yield event.plain_result(HELP_TEXT)
+            else:
+                async for result in self.tarot.sister_divine(event):
+                    yield result
+            event.stop_event()
+        except Exception as e:
+            logger.error(f"占卜师大姐姐模式失败: {e}")
+            yield event.plain_result(f"占卜师大姐姐模式失败: {e}")
