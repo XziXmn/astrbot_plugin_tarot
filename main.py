@@ -228,8 +228,15 @@ class Tarot:
         event: AstrMessageEvent,
     ) -> str:
         prompt = (
-            f"你是一位专业的塔罗牌占卜师，用户输入了以下完整占卜指令：'{user_input}'。\n"
-            f"请根据以下信息为用户提供详细的占卜结果解析：\n\n"
+            f"一位来访者坐在你的塔罗馆里，向你寻求指引。用户输入了以下完整占卜指令：'{user_input}'。\n"
+            f"请根据以下抽到的牌，以薇拉姐姐的身份、语气与风格，为来访者解读命运。\n"
+            f"你的解读要慵懒、妩媚、温柔而危险，像狐狸一样狡黠，"
+            f"可以时不时轻轻调侃或挑逗来访者，比如调侃对方的紧张、害羞或嘴硬，"
+            f"但要保持优雅与分寸，让对方感到被吸引而不是被冒犯。\n"
+            f"善用~、…、🌙、✨、🍷、💋、🖤、🦊、🌹等符号，"
+            f"称呼对方为「小家伙」「小可怜」「我的小迷路鬼」「乖孩子」「小骗子」「害羞鬼」等。\n"
+            f"回答约200-300字，重点突出用户输入的主题（如{user_input}），"
+            f"解释这些牌可能对来访者生活、情感或决策的启示。\n\n"
         )
         prompt += f"牌阵：{formation_name}\n"
         prompt += "抽到的牌及位置：\n"
@@ -242,17 +249,12 @@ class Tarot:
                 f"「{card['meaning']['up' if is_upright else 'down']}」"
             )
             prompt += f"{position}: {card_text}\n"
-        prompt += (
-            f"\n请结合用户指令（'{user_input}'），分析牌阵的含义和每张牌的具体位置，"
-            f"提供一个连贯的解析，解释这些牌可能对用户的生活、情感或决策的启示。"
-            f"回答需简洁但有深度，约200-300字，重点突出用户输入的主题（如{user_input}）。"
-            f"同时请确保解析结果整洁、可阅读性强，善用换行与颜表情（如😊、✨、🌟等）进行美化。"
-        )
+        prompt += "\n请直接以来访者能读懂的方式输出解读。"
         try:
             return await self._call_llm(
                 event,
                 prompt=prompt,
-                system_prompt="你是一个专业的塔罗牌占卜师，擅长提供深入且简洁的解析。",
+                system_prompt=SISTER_PERSONA + " 你正在向来访者解读塔罗牌。",
             )
         except Exception as e:
             logger.error(f"生成 AI 解析失败: {e}")
@@ -681,7 +683,7 @@ SISTER_PERSONA = (
 )
 
 HELP_TEXT = (
-    "赛博塔罗牌 v0.3.7\n"
+    "赛博塔罗牌 v0.3.8\n"
     "[占卜] 随机选取牌阵进行占卜并提供 AI 解析，可附加关键词（如 '占卜 情感'）匹配牌阵\n"
     "[塔罗牌] 得到单张塔罗牌回应及 AI 解析\n"
     "[薇拉/玫瑰小姐/玫瑰姐姐/薇拉姐姐/占卜师] 唤出薇拉姐姐，进入持续引导对话，聊完后进行专属占卜\n"
@@ -689,7 +691,7 @@ HELP_TEXT = (
 )
 
 
-@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.3.7")
+@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.3.8")
 class TarotPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
