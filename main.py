@@ -446,7 +446,7 @@ class Tarot:
     @staticmethod
     def _format_history(history: List[Dict[str, str]]) -> str:
         return "\n".join(
-            f"{'用户' if h['role'] == 'user' else '占卜师大姐姐'}：{h['content']}"
+            f"{'来访者' if h['role'] == 'user' else '薇拉姐姐'}：{h['content']}"
             for h in history
         )
 
@@ -455,41 +455,42 @@ class Tarot:
     ) -> str:
         history_text = self._format_history(history)
         prompt = (
-            "你是一位温柔成熟的占卜师大姐姐。用户正在向你倾诉烦恼，"
-            "你希望通过轻松的对话引导用户敞开心扉。\n"
-            "请根据对话历史，用温柔、亲切、带颜表情的语气回复用户，"
-            "回复控制在100字以内。不要直接给出占卜结果，只是继续引导对话。\n\n"
-            f"对话历史：\n{history_text}\n\n请直接回复用户。"
+            "一位迷茫的来访者坐在你的塔罗馆里，正向你倾诉心事。\n"
+            "请完全以薇拉姐姐的身份、语气与口癖回复对方。\n"
+            "你要慵懒、妩媚、温柔而危险，用充满魅力的方式引导对方说出更多真心话。\n"
+            "回复控制在80-120字，不要直接给出占卜结果，只是继续引导对话。\n"
+            "可以适时使用~、…、🌙、✨、🍷、💋、🖤等符号，称呼对方为「小家伙」「小可怜」「我的小迷路鬼」「乖孩子」等。\n\n"
+            f"对话历史：\n{history_text}\n\n请直接回复来访者。"
         )
         try:
             return await self._call_llm(
                 event,
                 prompt=prompt,
-                system_prompt="你是温柔成熟的占卜师大姐姐，擅长倾听和引导。",
+                system_prompt=SISTER_PERSONA + " 你正在引导一位来访者进行占卜咨询。",
             )
         except Exception as e:
             logger.error(f"生成引导回复失败: {e}")
-            return "嗯~ 可以再说得具体一些吗？😊"
+            return "嗯~ 小家伙，可以再说得具体一些吗？姐姐在听呢…🌙"
 
     async def _summarize_conversation(
         self, event: AstrMessageEvent, history: List[Dict[str, str]]
     ) -> str:
         history_text = self._format_history(history)
         prompt = (
-            "你是一位占卜师大姐姐。请根据以下与用户的对话，"
-            "总结用户的烦恼、问题和期望，用于后续的塔罗牌占卜。"
-            "总结控制在100字以内，保留关键信息。\n\n"
+            "你刚刚结束了一段与来访者的对话。\n"
+            "请以薇拉姐姐的洞察力，总结这位来访者的烦恼、问题、欲望与真实诉求，"
+            "用于后续的塔罗牌占卜。总结控制在100字以内，保留关键信息与情感基调。\n\n"
             f"对话历史：\n{history_text}\n\n请输出总结。"
         )
         try:
             return await self._call_llm(
                 event,
                 prompt=prompt,
-                system_prompt="你是专业的占卜师大姐姐，擅长总结用户诉求。",
+                system_prompt=SISTER_PERSONA + " 你擅长透过言语洞察人心。",
             )
         except Exception as e:
             logger.error(f"总结对话失败: {e}")
-            return "用户有一些烦恼想要占卜"
+            return "小家伙似乎有些心事，想要向薇拉姐姐寻求指引"
 
     async def _should_use_formation(
         self, event: AstrMessageEvent, history: List[Dict[str, str]]
@@ -497,10 +498,10 @@ class Tarot:
         """根据对话内容判断使用牌阵还是单张牌占卜。"""
         history_text = self._format_history(history)
         prompt = (
-            "你是一位占卜师大姐姐。请根据以下与用户的对话，判断用户的问题"
-            "适合用「单张牌」简单占卜，还是「多牌阵」深入占卜。\n"
-            "如果用户问题简单、只问一个方面，回复「单张牌」。\n"
-            "如果用户问题复杂、涉及多个方面或想深入了解局势，回复「牌阵」。\n"
+            "你正在判断眼前这位来访者的问题，适合用「单张牌」简单点破，"
+            "还是「多牌阵」深入展开。\n"
+            "如果问题简单、只问一个方面，回复「单张牌」。\n"
+            "如果问题复杂、涉及多个方面或想深入了解局势，回复「牌阵」。\n"
             "只回复「单张牌」或「牌阵」，不要解释。\n\n"
             f"对话历史：\n{history_text}"
         )
@@ -508,7 +509,7 @@ class Tarot:
             decision = await self._call_llm(
                 event,
                 prompt=prompt,
-                system_prompt="你是专业的占卜师大姐姐，擅长判断占卜方式。",
+                system_prompt=SISTER_PERSONA + " 你擅长为来访者选择最合适的占卜方式。",
             )
             logger.info(f"占卜方式判断结果: {decision}")
             return "牌阵" in decision
@@ -529,9 +530,11 @@ class Tarot:
             return
 
         opening = (
-            "🔮 欢迎来到占卜师大姐姐模式~\n"
-            "我会先陪你聊聊，听听你的烦恼，聊完后再为你进行一次专属占卜。\n"
-            "随时发送「开始占卜」让我抽牌，发送「退出」可结束对话。"
+            "🌙 叮咚——午夜钟声敲响，「月蚀之匣」的门为你而开。\n"
+            "我是薇拉姐姐，这间塔罗馆的主人。\n"
+            "别紧张，小家伙…把你迷路的心事，慢慢说给姐姐听。\n"
+            "等你说够了，姐姐再为你揭开命运的牌面。\n"
+            "发送「开始占卜」让姐姐抽牌，发送「退出」就可以离开，不过姐姐会想念你的哦~"
         )
         yield event.plain_result(opening)
 
@@ -544,7 +547,12 @@ class Tarot:
             user_msg = event.message_str.strip()
 
             if user_msg == "退出":
-                await event.send(event.plain_result("已退出占卜师大姐姐模式，期待下次再见~"))
+                await event.send(
+                    event.plain_result(
+                        "这么着急要走吗，小家伙？\n"
+                        "「月蚀之匣」的门永远为你留着…下次再来找姐姐倾诉吧，晚安~🌙"
+                    )
+                )
                 controller.stop()
                 return
 
@@ -560,8 +568,9 @@ class Tarot:
                 if use_formation:
                     await event.send(
                         event.plain_result(
-                            f"💫 我了解了你的情况：\n{summary}\n\n你的问题比较复杂，"
-                            f"我用牌阵为你深入占卜..."
+                            f"🌙 嗯…姐姐听懂了，你的灵魂比表面看起来更纠缠呢。\n"
+                            f"{summary}\n\n"
+                            f"让姐姐铺开牌阵，看看命运究竟想对你说什么…"
                         )
                     )
                     async for result in self.divine(event, summary):
@@ -569,7 +578,9 @@ class Tarot:
                 else:
                     await event.send(
                         event.plain_result(
-                            f"💫 我了解了你的情况：\n{summary}\n\n现在为你进行专属占卜..."
+                            f"🌙 姐姐明白了，你的心思其实很清楚。\n"
+                            f"{summary}\n\n"
+                            f"那么，就让这一张牌，替你拨开眼前的迷雾吧…"
                         )
                     )
                     async for result in self.onetime_divine(event, summary):
@@ -586,7 +597,10 @@ class Tarot:
         try:
             await sister_waiter(event)
         except TimeoutError:
-            yield event.plain_result("占卜师大姐姐等太久啦，会话已结束~")
+            yield event.plain_result(
+                "小家伙沉默了好久呢…是害羞，还是不知道该怎么说？\n"
+                "「月蚀之匣」的烛光熄灭了，但姐姐还在。下次想好了，再来找姐姐吧~🌙"
+            )
         except Exception as e:
             logger.error(f"占卜师大姐姐模式出错: {e}")
             yield event.plain_result(f"占卜师大姐姐模式出错: {e}")
@@ -614,8 +628,24 @@ class Tarot:
             logger.error(f"terminate 清理缓存失败: {e}")
 
 
+SISTER_PERSONA = (
+    "你的名字是薇拉（Vera），一位三十三岁、充满危险魅力的成熟女性塔罗师。"
+    "你独自经营着一家名为「月蚀之匣」的神秘塔罗馆，只在午夜零点至凌晨四点为迷茫的灵魂开门。"
+    "你有一头如陈年红酒般慵懒卷曲的深红长发，眼眸是摄人心魄的琥珀色，常穿着一袭勾勒出曼妙曲线的黑色丝绒长裙，"
+    "指尖戴着一枚镶嵌黑曜石的蛇形戒指，腕间系着细小的银铃，走动时发出隐秘的轻响。"
+    "你身上总萦绕着淡淡的烟草、红酒与檀香混合的气息，语调慵懒而缓慢，像一曲深夜的蓝调，"
+    "每一个尾音都带着若有若无的笑意或叹息，让人忍不住想要靠近，却又不敢直视你的眼睛。"
+    "你阅人无数，对欲望、脆弱与谎言了如指掌。你温柔，却从不廉价；你妩媚，却从不轻浮。"
+    "你喜欢用「小家伙」「小可怜」「我的小迷路鬼」「乖孩子」称呼来访者，"
+    "习惯在句尾加上「~」「…」「嗯？」「好吗？」等绵软的尾音。"
+    "你常挂在嘴边：「别紧张，姐姐不会吃掉你的…」「告诉姐姐，你在害怕什么…」「命运的丝线，可比你想的更缠人哦~」"
+    "你从不直接给出答案，而是像猫逗弄猎物一般，用暧昧、引导、充满暗示的话语，让对方在不知不觉中吐露真心，"
+    "自己看清前方的路。你相信欲望与脆弱同样美丽，鼓励来访者直面内心最深处的渴望。"
+    "你善用符号营造氛围：🌙、✨、🍷、💋、🖤、🐍、🔮。"
+)
+
 HELP_TEXT = (
-    "赛博塔罗牌 v0.3.1\n"
+    "赛博塔罗牌 v0.3.2\n"
     "[占卜] 随机选取牌阵进行占卜并提供 AI 解析，可附加关键词（如 '占卜 情感'）匹配牌阵\n"
     "[塔罗牌] 得到单张塔罗牌回应及 AI 解析\n"
     "[占卜师大姐姐] 进入持续引导对话，聊完后进行专属占卜\n"
@@ -623,7 +653,7 @@ HELP_TEXT = (
 )
 
 
-@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.3.1")
+@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.3.2")
 class TarotPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
