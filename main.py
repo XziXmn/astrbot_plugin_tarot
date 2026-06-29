@@ -144,67 +144,72 @@ class Tarot:
         prompt: str,
         system_prompt: str,
     ) -> str:
-        """兼容新旧版本 AstrBot 的 LLM 调用封装。"""
+        """兼容新旧版本 AstrBot 的 LLM 调用封装。会按顺序尝试多个候选提供商。"""
         umo = getattr(event, "unified_msg_origin", "unknown")
 
-        # 优先使用 v4.5.7+ 推荐的统一接口
-        if hasattr(self.context, "llm_generate") and hasattr(
-            self.context, "get_current_chat_provider_id"
-        ):
-            try:
-                provider_id = await self.context.get_current_chat_provider_id(
-                    umo=umo
-                )
-                llm_resp = await self.context.llm_generate(
-                    chat_provider_id=provider_id,
-                    prompt=prompt,
-                    system_prompt=system_prompt,
-                )
-                return llm_resp.completion_text.strip()
-            except Exception as e:
-                logger.warning(
-                    f"llm_generate(umo={umo}) 调用失败，尝试使用默认提供商: {e}"
-                )
-                try:
-                    default_provider_id = None
-                    default_prov = self.context.get_using_provider()
-                    if default_prov:
-                        default_provider_id = default_prov.meta().id
-                    if default_provider_id:
-                        llm_resp = await self.context.llm_generate(
-                            chat_provider_id=default_provider_id,
-                            prompt=prompt,
-                            system_prompt=system_prompt,
-                        )
-                        return llm_resp.completion_text.strip()
-                except Exception as e2:
-                    logger.warning(f"llm_generate 默认调用失败，尝试回退到 text_chat: {e2}")
+        # 收集候选 provider_id，去重并保持顺序
+        candidate_ids: List[str] = []
 
-        # 回退到旧版 Provider.text_chat 接口
+        def _add_id(pid: str):
+            if pid and pid not in candidate_ids:
+                candidate_ids.append(pid)
+
+        # 1) UMO 指定的提供商
+        if hasattr(self.context, "get_current_chat_provider_id"):
+            try:
+                _add_id(await self.context.get_current_chat_provider_id(umo=umo))
+            except Exception as e:
+                logger.debug(f"get_current_chat_provider_id(umo={umo}) 未找到指定提供商: {e}")
+
+        # 2) 全局默认提供商
         try:
-            prov = self.context.get_using_provider(umo=umo)
+            default_prov = self.context.get_using_provider()
+            if default_prov:
+                _add_id(default_prov.meta().id)
         except Exception as e:
-            logger.warning(f"get_using_provider(umo={umo}) 调用失败: {e}")
-            prov = None
-        if not prov:
-            try:
-                prov = self.context.get_using_provider()
-            except Exception as e:
-                logger.warning(f"get_using_provider() 无 UMO 调用失败: {e}")
-                prov = None
-        if not prov:
-            all_providers = self.context.get_all_providers()
-            if all_providers:
-                prov = all_providers[0]
-                logger.info(f"未找到会话提供商，使用第一个可用 LLM 提供商: {prov.meta().id}")
-        if not prov:
-            raise RuntimeError(f"未找到可用的 LLM 提供商 (UMO: {umo})")
+            logger.debug(f"get_using_provider() 获取默认提供商失败: {e}")
 
-        llm_resp = await prov.text_chat(
-            prompt=prompt,
-            system_prompt=system_prompt,
-        )
-        return llm_resp.completion_text.strip()
+        # 3) UMO 回退的提供商
+        try:
+            umo_prov = self.context.get_using_provider(umo=umo)
+            if umo_prov:
+                _add_id(umo_prov.meta().id)
+        except Exception as e:
+            logger.debug(f"get_using_provider(umo={umo}) 获取失败: {e}")
+
+        # 4) 所有已加载的 LLM 提供商
+        for prov in self.context.get_all_providers():
+            _add_id(prov.meta().id)
+
+        if not candidate_ids:
+            raise RuntimeError(f"未找到任何可用的 LLM 提供商 (UMO: {umo})")
+
+        last_error = None
+        for provider_id in candidate_ids:
+            try:
+                if hasattr(self.context, "llm_generate"):
+                    llm_resp = await self.context.llm_generate(
+                        chat_provider_id=provider_id,
+                        prompt=prompt,
+                        system_prompt=system_prompt,
+                    )
+                    return llm_resp.completion_text.strip()
+
+                # 旧版回退
+                prov = self.context.get_provider_by_id(provider_id)
+                if prov and hasattr(prov, "text_chat"):
+                    llm_resp = await prov.text_chat(
+                        prompt=prompt,
+                        system_prompt=system_prompt,
+                    )
+                    return llm_resp.completion_text.strip()
+            except Exception as e:
+                logger.warning(f"LLM 提供商 {provider_id} 调用失败: {e}")
+                last_error = e
+
+        raise RuntimeError(
+            f"所有 LLM 提供商均调用失败 (UMO: {umo})"
+        ) from last_error
 
     async def _match_formation(
         self, text: str, all_formations: Dict, event: AstrMessageEvent
@@ -921,7 +926,7 @@ class Tarot:
 
 
 HELP_TEXT = (
-    "赛博塔罗牌 v0.5.2\n"
+    "赛博塔罗牌 v0.5.3\n"
     "[占卜] 随机选取牌阵进行占卜并提供 AI 解析，可附加关键词（如 '占卜 情感'）匹配牌阵\n"
     "[塔罗牌] 得到单张塔罗牌回应及 AI 解析\n"
     "[薇拉/玫瑰小姐/玫瑰姐姐/薇拉姐姐/占卜师] 唤出薇拉姐姐，自动转入私聊进行持续引导对话，聊完后进行专属占卜\n"
@@ -929,7 +934,7 @@ HELP_TEXT = (
 )
 
 
-@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.5.2")
+@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.5.3")
 class TarotPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
