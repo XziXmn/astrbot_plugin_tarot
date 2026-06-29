@@ -491,6 +491,31 @@ class Tarot:
             logger.error(f"总结对话失败: {e}")
             return "用户有一些烦恼想要占卜"
 
+    async def _should_use_formation(
+        self, event: AstrMessageEvent, history: List[Dict[str, str]]
+    ) -> bool:
+        """根据对话内容判断使用牌阵还是单张牌占卜。"""
+        history_text = self._format_history(history)
+        prompt = (
+            "你是一位占卜师大姐姐。请根据以下与用户的对话，判断用户的问题"
+            "适合用「单张牌」简单占卜，还是「多牌阵」深入占卜。\n"
+            "如果用户问题简单、只问一个方面，回复「单张牌」。\n"
+            "如果用户问题复杂、涉及多个方面或想深入了解局势，回复「牌阵」。\n"
+            "只回复「单张牌」或「牌阵」，不要解释。\n\n"
+            f"对话历史：\n{history_text}"
+        )
+        try:
+            decision = await self._call_llm(
+                event,
+                prompt=prompt,
+                system_prompt="你是专业的占卜师大姐姐，擅长判断占卜方式。",
+            )
+            logger.info(f"占卜方式判断结果: {decision}")
+            return "牌阵" in decision
+        except Exception as e:
+            logger.error(f"判断占卜方式失败: {e}")
+            return False
+
     async def sister_divine(self, event: AstrMessageEvent):
         """占卜师大姐姐模式：持续引导对话，最后进行专属占卜。"""
         try:
@@ -530,11 +555,25 @@ class Tarot:
 
             if should_divine:
                 summary = await self._summarize_conversation(event, history)
-                await event.send(
-                    event.plain_result(f"💫 我了解了你的情况：\n{summary}\n\n现在为你进行专属占卜...")
-                )
-                async for result in self.onetime_divine(event, summary):
-                    await event.send(result)
+                use_formation = await self._should_use_formation(event, history)
+
+                if use_formation:
+                    await event.send(
+                        event.plain_result(
+                            f"💫 我了解了你的情况：\n{summary}\n\n你的问题比较复杂，"
+                            f"我用牌阵为你深入占卜..."
+                        )
+                    )
+                    async for result in self.divine(event, summary):
+                        await event.send(result)
+                else:
+                    await event.send(
+                        event.plain_result(
+                            f"💫 我了解了你的情况：\n{summary}\n\n现在为你进行专属占卜..."
+                        )
+                    )
+                    async for result in self.onetime_divine(event, summary):
+                        await event.send(result)
                 controller.stop()
                 return
 
@@ -576,7 +615,7 @@ class Tarot:
 
 
 HELP_TEXT = (
-    "赛博塔罗牌 v0.3.0\n"
+    "赛博塔罗牌 v0.3.1\n"
     "[占卜] 随机选取牌阵进行占卜并提供 AI 解析，可附加关键词（如 '占卜 情感'）匹配牌阵\n"
     "[塔罗牌] 得到单张塔罗牌回应及 AI 解析\n"
     "[占卜师大姐姐] 进入持续引导对话，聊完后进行专属占卜\n"
@@ -584,7 +623,7 @@ HELP_TEXT = (
 )
 
 
-@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.3.0")
+@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.3.1")
 class TarotPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
