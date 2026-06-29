@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import random
+import traceback
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -144,13 +145,15 @@ class Tarot:
         system_prompt: str,
     ) -> str:
         """兼容新旧版本 AstrBot 的 LLM 调用封装。"""
+        umo = getattr(event, "unified_msg_origin", "unknown")
+
         # 优先使用 v4.5.7+ 推荐的统一接口
         if hasattr(self.context, "llm_generate") and hasattr(
             self.context, "get_current_chat_provider_id"
         ):
             try:
                 provider_id = await self.context.get_current_chat_provider_id(
-                    umo=event.unified_msg_origin
+                    umo=umo
                 )
                 llm_resp = await self.context.llm_generate(
                     chat_provider_id=provider_id,
@@ -159,18 +162,30 @@ class Tarot:
                 )
                 return llm_resp.completion_text.strip()
             except Exception as e:
-                logger.warning(f"llm_generate(umo) 调用失败，尝试使用默认提供商: {e}")
+                logger.warning(
+                    f"llm_generate(umo={umo}) 调用失败，尝试使用默认提供商: {e}"
+                )
                 try:
-                    llm_resp = await self.context.llm_generate(
-                        prompt=prompt,
-                        system_prompt=system_prompt,
-                    )
-                    return llm_resp.completion_text.strip()
+                    default_provider_id = None
+                    default_prov = self.context.get_using_provider()
+                    if default_prov:
+                        default_provider_id = default_prov.meta().id
+                    if default_provider_id:
+                        llm_resp = await self.context.llm_generate(
+                            chat_provider_id=default_provider_id,
+                            prompt=prompt,
+                            system_prompt=system_prompt,
+                        )
+                        return llm_resp.completion_text.strip()
                 except Exception as e2:
                     logger.warning(f"llm_generate 默认调用失败，尝试回退到 text_chat: {e2}")
 
         # 回退到旧版 Provider.text_chat 接口
-        prov = self.context.get_using_provider(umo=event.unified_msg_origin)
+        try:
+            prov = self.context.get_using_provider(umo=umo)
+        except Exception as e:
+            logger.warning(f"get_using_provider(umo={umo}) 调用失败: {e}")
+            prov = None
         if not prov:
             try:
                 prov = self.context.get_using_provider()
@@ -178,7 +193,12 @@ class Tarot:
                 logger.warning(f"get_using_provider() 无 UMO 调用失败: {e}")
                 prov = None
         if not prov:
-            raise RuntimeError("未找到可用的 LLM 提供商")
+            all_providers = self.context.get_all_providers()
+            if all_providers:
+                prov = all_providers[0]
+                logger.info(f"未找到会话提供商，使用第一个可用 LLM 提供商: {prov.meta().id}")
+        if not prov:
+            raise RuntimeError(f"未找到可用的 LLM 提供商 (UMO: {umo})")
 
         llm_resp = await prov.text_chat(
             prompt=prompt,
@@ -535,7 +555,7 @@ class Tarot:
                 system_prompt=PERSONA + " 你正在引导一位来访者进行占卜咨询。",
             )
         except Exception as e:
-            logger.error(f"生成引导回复失败: {e}")
+            logger.error(f"生成引导回复失败: {e}\n{traceback.format_exc()}")
             return "嗯~ 小家伙，可以再说得具体一些吗？姐姐在听呢…🌙"
 
     async def _summarize_conversation(
@@ -901,7 +921,7 @@ class Tarot:
 
 
 HELP_TEXT = (
-    "赛博塔罗牌 v0.5.1\n"
+    "赛博塔罗牌 v0.5.2\n"
     "[占卜] 随机选取牌阵进行占卜并提供 AI 解析，可附加关键词（如 '占卜 情感'）匹配牌阵\n"
     "[塔罗牌] 得到单张塔罗牌回应及 AI 解析\n"
     "[薇拉/玫瑰小姐/玫瑰姐姐/薇拉姐姐/占卜师] 唤出薇拉姐姐，自动转入私聊进行持续引导对话，聊完后进行专属占卜\n"
@@ -909,7 +929,7 @@ HELP_TEXT = (
 )
 
 
-@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.5.1")
+@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.5.2")
 class TarotPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
