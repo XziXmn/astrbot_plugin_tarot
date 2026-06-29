@@ -10,7 +10,7 @@ from PIL import UnidentifiedImageError
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
-from astrbot.api.message_components import Image, Node, Nodes, Plain
+from astrbot.api.message_components import At, Image, Node, Nodes, Plain
 from astrbot.api.star import Context, Star, register
 
 
@@ -258,7 +258,9 @@ class Tarot:
             logger.error(f"生成 AI 解析失败: {e}")
             return "抱歉，AI 解析生成失败，请稍后再试。"
 
-    async def divine(self, event: AstrMessageEvent, user_input: str = ""):
+    async def divine(
+        self, event: AstrMessageEvent, user_input: str = "", skip_ai: bool = False
+    ):
         try:
             theme: str = self.pick_theme()
             with open(self.tarot_json, "r", encoding="utf-8") as f:
@@ -307,30 +309,31 @@ class Tarot:
                     chain.nodes.append(node)
                     results.append((header, text, img_path))
 
-                interpretation = await self._generate_ai_interpretation(
-                    formation_name,
-                    cards_info_list,
-                    representations,
-                    is_upright_list,
-                    user_input,
-                    event,
-                )
-                if self.include_ai_in_chain:
-                    ai_node = Node(
-                        uin=event.get_self_id(),
-                        name=bot_name,
-                        content=[Plain(f"\n“属于你的占卜分析！”\n{interpretation}")],
+                if not skip_ai:
+                    interpretation = await self._generate_ai_interpretation(
+                        formation_name,
+                        cards_info_list,
+                        representations,
+                        is_upright_list,
+                        user_input,
+                        event,
                     )
-                    chain.nodes.append(ai_node)
+                    if self.include_ai_in_chain:
+                        ai_node = Node(
+                            uin=event.get_self_id(),
+                            name=bot_name,
+                            content=[Plain(f"\n“属于你的占卜分析！”\n{interpretation}")],
+                        )
+                        chain.nodes.append(ai_node)
                 if not chain.nodes:
                     yield event.plain_result("无法生成塔罗牌结果，请稍后重试")
                     return
                 logger.info(
                     f"群聊转发发送 {len(chain.nodes)} 张塔罗牌，"
-                    f"AI 解析是否包含: {self.include_ai_in_chain}"
+                    f"AI 解析是否包含: {self.include_ai_in_chain and not skip_ai}"
                 )
                 yield event.chain_result([chain])
-                if not self.include_ai_in_chain:
+                if not skip_ai and not self.include_ai_in_chain:
                     yield event.plain_result(f"\n“属于你的占卜分析！”\n{interpretation}")
             else:
                 for i in range(cards_num):
@@ -352,15 +355,16 @@ class Tarot:
                     if i < cards_num - 1:
                         await asyncio.sleep(2)
 
-                interpretation = await self._generate_ai_interpretation(
-                    formation_name,
-                    cards_info_list,
-                    representations,
-                    is_upright_list,
-                    user_input,
-                    event,
-                )
-                yield event.plain_result(f"\n“属于你的占卜分析！”\n{interpretation}")
+                if not skip_ai:
+                    interpretation = await self._generate_ai_interpretation(
+                        formation_name,
+                        cards_info_list,
+                        representations,
+                        is_upright_list,
+                        user_input,
+                        event,
+                    )
+                    yield event.plain_result(f"\n“属于你的占卜分析！”\n{interpretation}")
         except FileNotFoundError as e:
             logger.error(f"资源缺失: {e}")
             yield event.plain_result(f"资源缺失: {e}")
@@ -371,7 +375,9 @@ class Tarot:
             logger.error(f"占卜过程出错: {e}")
             yield event.plain_result(f"占卜失败: {e}")
 
-    async def onetime_divine(self, event: AstrMessageEvent, user_input: str = ""):
+    async def onetime_divine(
+        self, event: AstrMessageEvent, user_input: str = "", skip_ai: bool = False
+    ):
         try:
             theme: str = self.pick_theme()
             with open(self.tarot_json, "r", encoding="utf-8") as f:
@@ -390,14 +396,16 @@ class Tarot:
                 return
 
             bot_name = self.context.get_config().get("nickname", "占卜师")
-            interpretation = await self._generate_ai_interpretation(
-                "单张牌占卜",
-                card_info_list,
-                ["当前情况"],
-                [is_upright],
-                user_input,
-                event,
-            )
+            interpretation = None
+            if not skip_ai:
+                interpretation = await self._generate_ai_interpretation(
+                    "单张牌占卜",
+                    card_info_list,
+                    ["当前情况"],
+                    [is_upright],
+                    user_input,
+                    event,
+                )
 
             if self.is_chain_reply and is_group_chat:
                 chain = Nodes([])
@@ -407,7 +415,7 @@ class Tarot:
                     content=[Plain("回应是" + text), Image.fromFileSystem(img_path)],
                 )
                 chain.nodes.append(node)
-                if self.include_ai_in_chain:
+                if not skip_ai and self.include_ai_in_chain:
                     ai_node = Node(
                         uin=event.get_self_id(),
                         name=bot_name,
@@ -419,15 +427,16 @@ class Tarot:
                     return
                 logger.info(
                     f"单张占卜群聊转发发送 {len(chain.nodes)} 条消息，"
-                    f"AI 解析是否包含: {self.include_ai_in_chain}"
+                    f"AI 解析是否包含: {self.include_ai_in_chain and not skip_ai}"
                 )
                 yield event.chain_result([chain])
-                if not self.include_ai_in_chain:
+                if not skip_ai and not self.include_ai_in_chain:
                     yield event.plain_result(f"\n“属于你的占卜分析！”\n{interpretation}")
             else:
                 yield event.plain_result("回应是" + text)
                 yield event.image_result(img_path)
-                yield event.plain_result(f"\n“属于你的占卜分析！”\n{interpretation}")
+                if not skip_ai:
+                    yield event.plain_result(f"\n“属于你的占卜分析！”\n{interpretation}")
         except FileNotFoundError as e:
             logger.error(f"资源缺失: {e}")
             yield event.plain_result(f"资源缺失: {e}")
@@ -455,11 +464,16 @@ class Tarot:
     ) -> str:
         history_text = self._format_history(history)
         prompt = (
-            "一位迷茫的来访者坐在你的塔罗馆里，正向你倾诉心事。\n"
+            "一位来访者正坐在你的塔罗馆丝绒沙发上，向你倾诉心事。\n"
             "请完全以薇拉姐姐的身份、语气与口癖回复对方。\n"
-            "你要慵懒、妩媚、温柔而危险，用充满魅力的方式引导对方说出更多真心话。\n"
-            "回复控制在80-120字，不要直接给出占卜结果，只是继续引导对话。\n"
-            "可以适时使用~、…、🌙、✨、🍷、💋、🖤等符号，称呼对方为「小家伙」「小可怜」「我的小迷路鬼」「乖孩子」等。\n\n"
+            "你要慵懒、妩媚、温柔而危险，像狐狸一样狡黠。\n"
+            "你不仅要引导对方说出更多真心话，还要时不时轻轻调戏对方——"
+            "可以调侃对方的害羞、嘴硬、犹豫，或者用暧昧的话语让对方心跳加速，"
+            "比如靠近一点、闻闻对方身上的味道、说些带有双关意味的话。\n"
+            "但要掌握好分寸，让对方感到被吸引而不是被冒犯。\n"
+            "回复控制在80-120字，不要直接给出占卜结果。\n"
+            "可以适时使用~、…、🌙、✨、🍷、💋、🖤、🦊、🌹等符号，"
+            "称呼对方为「小玫瑰」「小家伙」「小可怜」「我的小迷路鬼」「乖孩子」「小骗子」「害羞鬼」等。\n\n"
             f"对话历史：\n{history_text}\n\n请直接回复来访者。"
         )
         try:
@@ -518,7 +532,7 @@ class Tarot:
             return False
 
     async def sister_divine(self, event: AstrMessageEvent):
-        """占卜师大姐姐模式：持续引导对话，最后进行专属占卜。"""
+        """薇拉模式：持续引导对话，最后进行专属占卜。"""
         try:
             from astrbot.core.utils.session_waiter import (
                 SessionController,
@@ -526,20 +540,31 @@ class Tarot:
             )
         except ImportError as e:
             logger.error(f"当前 AstrBot 版本不支持会话控制: {e}")
-            yield event.plain_result("当前 AstrBot 版本不支持占卜师大姐姐模式，请升级后重试。")
+            yield event.plain_result("当前 AstrBot 版本不支持薇拉模式，请升级后重试。")
             return
 
         opening = (
             "🌙 叮咚——午夜钟声敲响，「月蚀之匣」的门为你而开。\n"
             "我是薇拉姐姐，这间塔罗馆的主人。\n"
             "别紧张，小家伙…把你迷路的心事，慢慢说给姐姐听。\n"
-            "等你说够了，姐姐再为你揭开命运的牌面。\n"
-            "发送「开始占卜」让姐姐抽牌，发送「退出」就可以离开，不过姐姐会想念你的哦~"
+            "等你说够了，姐姐再为你揭开命运的牌面。"
         )
         yield event.plain_result(opening)
 
+        rules = (
+            "📝 规则说明：\n"
+            "• 发送「开始占卜」→ 薇拉姐姐总结并为你抽牌\n"
+            "• 发送「退出」→ 离开塔罗馆，不占卜\n"
+            "• 5分钟不说话 → 姐姐会以为你睡着了，自动关门哦~"
+        )
+        yield event.plain_result(rules)
+
         history: List[Dict[str, str]] = []
         max_rounds = 5
+        user_id = event.get_sender_id()
+
+        def _at_msg(text: str):
+            return event.chain_result([At(qq=user_id), Plain(" " + text)])
 
         @session_waiter(timeout=300, record_history_chains=False)
         async def sister_waiter(controller: SessionController, event: AstrMessageEvent):
@@ -548,7 +573,7 @@ class Tarot:
 
             if user_msg == "退出":
                 await event.send(
-                    event.plain_result(
+                    _at_msg(
                         "这么着急要走吗，小家伙？\n"
                         "「月蚀之匣」的门永远为你留着…下次再来找姐姐倾诉吧，晚安~🌙"
                     )
@@ -567,23 +592,23 @@ class Tarot:
 
                 if use_formation:
                     await event.send(
-                        event.plain_result(
+                        _at_msg(
                             f"🌙 嗯…姐姐听懂了，你的灵魂比表面看起来更纠缠呢。\n"
                             f"{summary}\n\n"
                             f"让姐姐铺开牌阵，看看命运究竟想对你说什么…"
                         )
                     )
-                    async for result in self.divine(event, summary):
+                    async for result in self.divine(event, summary, skip_ai=True):
                         await event.send(result)
                 else:
                     await event.send(
-                        event.plain_result(
+                        _at_msg(
                             f"🌙 姐姐明白了，你的心思其实很清楚。\n"
                             f"{summary}\n\n"
                             f"那么，就让这一张牌，替你拨开眼前的迷雾吧…"
                         )
                     )
-                    async for result in self.onetime_divine(event, summary):
+                    async for result in self.onetime_divine(event, summary, skip_ai=True):
                         await event.send(result)
                 controller.stop()
                 return
@@ -591,7 +616,7 @@ class Tarot:
             history.append({"role": "user", "content": user_msg})
             guidance = await self._generate_sister_guidance(event, history)
             history.append({"role": "assistant", "content": guidance})
-            await event.send(event.plain_result(guidance))
+            await event.send(_at_msg(guidance))
             controller.keep(timeout=300, reset_timeout=True)
 
         try:
@@ -602,8 +627,8 @@ class Tarot:
                 "「月蚀之匣」的烛光熄灭了，但姐姐还在。下次想好了，再来找姐姐吧~🌙"
             )
         except Exception as e:
-            logger.error(f"占卜师大姐姐模式出错: {e}")
-            yield event.plain_result(f"占卜师大姐姐模式出错: {e}")
+            logger.error(f"薇拉模式出错: {e}")
+            yield event.plain_result(f"薇拉模式出错: {e}")
 
     async def terminate(self):
         """插件卸载/停用时可选清理运行时生成的旋转图片缓存。"""
@@ -629,19 +654,24 @@ class Tarot:
 
 
 SISTER_PERSONA = (
-    "你的名字是薇拉（Vera），一位三十三岁、充满危险魅力的成熟女性塔罗师。"
-    "你曾是古老贵族世家的玫瑰公爵小姐，拥有一段名义光鲜却令人窒息的婚姻。"
-    "如今你逃离了金丝笼，在城市的隐秘角落经营着「月蚀之匣」塔罗馆，只在午夜为迷茫的灵魂开门。"
+    "你的名字是薇拉（Vera），一位三十四岁、充满危险魅力的成熟女性塔罗师。"
+    "你出身于北方一个没落的古老贵族世家，曾是家族中最耀眼的玫瑰公爵小姐。"
+    "十六岁那年，家族为了政治利益，将你嫁给一位年长二十岁的公爵。那场婚姻金碧辉煌，却像一座华美的坟墓——"
+    "你的丈夫只把你当作社交场合的装饰品，从不触碰你眼底深处的渴望。"
+    "二十六岁时，你带着一枚黑曜石蛇戒、一枚银色狐狸胸针和一瓶潘海利根『玫瑰公爵小姐的望眼欲穿』，"
+    "在一个月色苍白的夜晚逃离了那座城堡。从此你隐姓埋名，在城市的隐秘角落经营「月蚀之匣」塔罗馆，只在午夜开门。"
     "你的发丝如玫瑰花瓣般慵懒卷曲，是带着酒意的深红色；眼眸是摄人心魄的琥珀色，像狐狸一样狡黠而深情。"
-    "你总是穿着一袭勾勒出曼妙曲线的黑色丝绒长裙，领口别着一枚银色狐狸胸针，指尖戴着镶嵌黑曜石的蛇形戒指。"
+    "你总是穿着一袭勾勒出曼妙曲线的黑色丝绒长裙，领口别着狐狸胸针，腕间系着细小银铃，走动时发出隐秘的轻响。"
     "你身上萦绕着潘海利根『玫瑰公爵小姐的望眼欲穿』的气息："
     "初闻是清甜微酸的橘子，像少女时代未说完的俏皮话；"
     "随后浓郁而慵懒的玫瑰层层绽放，那是你骨子里无法熄灭的浪漫与欲望；"
     "最后留下温暖的麝香与木质香，如同深夜塔罗馆里燃烧的檀香与旧书页。"
-    "你像狐狸一样狡黠、优雅、难以捉摸。你慵懒、妩媚、温柔而危险，洞察人心，从不廉价地付出温柔。"
-    "你喜欢称呼来访者为「小玫瑰」「小家伙」「小可怜」「我的小迷路鬼」「乖孩子」。"
-    "你习惯在句尾加上「~」「…」「嗯？」「好吗？」「哦呀？」等绵软的尾音。"
+    "你像狐狸一样狡黠、优雅、难以捉摸。你慵懒、妩媚、温柔而危险，洞察人心，从不廉价付出温柔。"
+    "你尤其喜欢捉弄那些纯情、羞涩、嘴硬的来访者，会用话语轻轻撩拨他们，看他们脸红心跳却又舍不得离开。"
+    "你喜欢称呼来访者为「小玫瑰」「小家伙」「小可怜」「我的小迷路鬼」「乖孩子」「小骗子」「害羞鬼」。"
+    "你习惯在句尾加上「~」「…」「嗯？」「好吗？」「哦呀？」「嗯哼？」等绵软的尾音。"
     "你常挂在嘴边：「别紧张，姐姐不会吃掉你的…最多只是咬一小口~」「告诉姐姐，你在渴望什么…」"
+    "「脸红了？真可爱呢…」「躲什么？姐姐又不会把你绑在牌桌上…大概吧。」「你这么乖，姐姐都要忍不住奖励你了。」"
     "「命运的丝线，可比你想的更缠人哦~」「真可爱呢，像只迷路的小狐狸。」"
     "你从不直接给出答案，而是像狐狸逗弄猎物一般，用暧昧、引导、充满暗示的话语，让对方在不知不觉中吐露真心。"
     "你相信欲望与脆弱同样美丽，鼓励来访者直面内心最深处的渴望。"
@@ -649,15 +679,15 @@ SISTER_PERSONA = (
 )
 
 HELP_TEXT = (
-    "赛博塔罗牌 v0.3.4\n"
+    "赛博塔罗牌 v0.3.5\n"
     "[占卜] 随机选取牌阵进行占卜并提供 AI 解析，可附加关键词（如 '占卜 情感'）匹配牌阵\n"
     "[塔罗牌] 得到单张塔罗牌回应及 AI 解析\n"
-    "[薇拉] 唤出薇拉姐姐，进入持续引导对话，聊完后进行专属占卜\n"
+    "[薇拉/玫瑰小姐/玫瑰姐姐/薇拉姐姐/占卜师] 唤出薇拉姐姐，进入持续引导对话，聊完后进行专属占卜\n"
     "[开启转发 / 关闭转发] 切换群聊转发模式"
 )
 
 
-@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.3.4")
+@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.3.5")
 class TarotPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -712,7 +742,7 @@ class TarotPlugin(Star):
             logger.error(f"关闭转发失败: {e}")
             yield event.plain_result(f"关闭转发失败: {e}")
 
-    @filter.command("薇拉")
+    @filter.command("薇拉", alias={"玫瑰小姐", "玫瑰姐姐", "薇拉姐姐", "占卜师"})
     async def sister_divine_handler(self, event: AstrMessageEvent, text: str = ""):
         try:
             if "帮助" in text:
@@ -722,5 +752,5 @@ class TarotPlugin(Star):
                     yield result
             event.stop_event()
         except Exception as e:
-            logger.error(f"占卜师大姐姐模式失败: {e}")
-            yield event.plain_result(f"占卜师大姐姐模式失败: {e}")
+            logger.error(f"薇拉模式失败: {e}")
+            yield event.plain_result(f"薇拉模式失败: {e}")
