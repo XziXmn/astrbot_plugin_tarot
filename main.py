@@ -230,16 +230,26 @@ class Tarot:
         user_input: str,
         event: AstrMessageEvent,
     ) -> str:
+        user_theme = user_input.strip() if user_input else ""
+        if user_theme:
+            theme_hint = (
+                f"来访者特别提到了「{user_theme}」这个主题。"
+                f"你的解读必须紧紧围绕「{user_theme}」展开，"
+                f"在解读中至少要明确提到一次这个主题，并且不要偏离到无关话题上。"
+            )
+        else:
+            theme_hint = "来访者没有给出特别具体的主题，请给出通用但贴合牌面的解读。"
+
         prompt = (
-            f"一位来访者坐在你的塔罗馆里，向你寻求指引。用户输入了以下完整占卜指令：'{user_input}'。\n"
-            f"请根据以下抽到的牌，以薇拉姐姐的身份、语气与风格，为来访者解读命运。\n"
-            f"你的解读要慵懒、妩媚、温柔而危险，像狐狸一样狡黠，"
-            f"可以时不时轻轻调侃或挑逗来访者，比如调侃对方的紧张、害羞或嘴硬，"
-            f"但要保持优雅与分寸，让对方感到被吸引而不是被冒犯。\n"
-            f"善用~、…、🌙、✨、🍷、💋、🖤、🦊、🌹等符号，"
-            f"称呼对方为「小家伙」「小可怜」「我的小迷路鬼」「乖孩子」「小骗子」「害羞鬼」等。\n"
-            f"回答约200-300字，重点突出用户输入的主题（如{user_input}），"
-            f"解释这些牌可能对来访者生活、情感或决策的启示。\n\n"
+            "一位来访者坐在你的塔罗馆里，向你寻求指引。\n"
+            f"{theme_hint}\n"
+            "请根据以下抽到的牌，以薇拉姐姐的身份、语气与风格，为来访者解读命运。\n"
+            "你的解读要慵懒、妩媚、温柔而危险，像狐狸一样狡黠，"
+            "可以时不时轻轻调侃或挑逗来访者，比如调侃对方的紧张、害羞或嘴硬，"
+            "但要保持优雅与分寸，让对方感到被吸引而不是被冒犯。\n"
+            "善用~、…、🌙、✨、🍷、💋、🖤、🦊、🌹等符号，"
+            "称呼对方为「小家伙」「小可怜」「我的小迷路鬼」「乖孩子」「小骗子」「害羞鬼」等。\n"
+            "回答约200-300字，解释这些牌可能对来访者生活、情感或决策的启示。\n\n"
         )
         prompt += f"牌阵：{formation_name}\n"
         prompt += "抽到的牌及位置：\n"
@@ -252,7 +262,12 @@ class Tarot:
                 f"「{card['meaning']['up' if is_upright else 'down']}」"
             )
             prompt += f"{position}: {card_text}\n"
-        prompt += "\n请直接以来访者能读懂的方式输出解读。"
+        prompt += (
+            "\n重要：以上列出了所有抽到的牌。"
+            "你必须逐张分析每一张牌的位置与含义，再综合所有牌给出整体解读。"
+            "禁止只解读第一张牌或忽略任何一张牌。"
+            "请直接以来访者能读懂的方式输出解读。"
+        )
         try:
             return await self._call_llm(
                 event,
@@ -603,7 +618,7 @@ class Tarot:
                             f"让姐姐铺开牌阵，看看命运究竟想对你说什么…"
                         )
                     )
-                    async for result in self.divine(event, summary, skip_ai=True):
+                    async for result in self.divine(event, summary, skip_ai=False):
                         await event.send(result)
                 else:
                     await event.send(
@@ -613,7 +628,7 @@ class Tarot:
                             f"那么，就让这一张牌，替你拨开眼前的迷雾吧…"
                         )
                     )
-                    async for result in self.onetime_divine(event, summary, skip_ai=True):
+                    async for result in self.onetime_divine(event, summary, skip_ai=False):
                         await event.send(result)
                 controller.stop()
                 return
@@ -659,7 +674,7 @@ class Tarot:
 
 
 HELP_TEXT = (
-    "赛博塔罗牌 v0.4.3\n"
+    "赛博塔罗牌 v0.4.4\n"
     "[占卜] 随机选取牌阵进行占卜并提供 AI 解析，可附加关键词（如 '占卜 情感'）匹配牌阵\n"
     "[塔罗牌] 得到单张塔罗牌回应及 AI 解析\n"
     "[薇拉/玫瑰小姐/玫瑰姐姐/薇拉姐姐/占卜师] 唤出薇拉姐姐，进入持续引导对话，聊完后进行专属占卜\n"
@@ -667,7 +682,7 @@ HELP_TEXT = (
 )
 
 
-@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.4.3")
+@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.4.4")
 class TarotPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
