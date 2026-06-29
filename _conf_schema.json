@@ -2,7 +2,8 @@
   "chain_reply": {
     "type": "bool",
     "default": true,
-    "description": "是否启用群聊合并转发模式"
+    "description": "是否启用群聊合并转发模式",
+    "hint": "开启后，群聊中的占卜结果会以合并转发（合并多条消息）的形式发送，避免刷屏。"
   },
   "resource_path": {
     "type": "string",
@@ -13,6 +14,7 @@
   "include_ai_in_chain": {
     "type": "bool",
     "default": true,
-    "description": "是否将 AI 解析信息加入群聊转发，若为 false 则单独发送"
+    "description": "是否将 AI 解析信息加入群聊转发",
+    "hint": "开启后，AI 解析会作为合并转发的最后一条消息一并发送；关闭则单独发送解析。"
   }
 }
