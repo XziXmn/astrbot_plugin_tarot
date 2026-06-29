@@ -159,10 +159,24 @@ class Tarot:
                 )
                 return llm_resp.completion_text.strip()
             except Exception as e:
-                logger.warning(f"llm_generate 调用失败，尝试回退到 text_chat: {e}")
+                logger.warning(f"llm_generate(umo) 调用失败，尝试使用默认提供商: {e}")
+                try:
+                    llm_resp = await self.context.llm_generate(
+                        prompt=prompt,
+                        system_prompt=system_prompt,
+                    )
+                    return llm_resp.completion_text.strip()
+                except Exception as e2:
+                    logger.warning(f"llm_generate 默认调用失败，尝试回退到 text_chat: {e2}")
 
         # 回退到旧版 Provider.text_chat 接口
         prov = self.context.get_using_provider(umo=event.unified_msg_origin)
+        if not prov:
+            try:
+                prov = self.context.get_using_provider()
+            except Exception as e:
+                logger.warning(f"get_using_provider() 无 UMO 调用失败: {e}")
+                prov = None
         if not prov:
             raise RuntimeError("未找到可用的 LLM 提供商")
 
@@ -839,10 +853,20 @@ class Tarot:
             await event.send(event.plain_result(guidance))
             controller.keep(timeout=300, reset_timeout=True)
 
-        original_umo = event.unified_msg_origin
-        event.unified_msg_origin = private_umo
+        class _PrivateSessionEventProxy:
+            """让 session_waiter 以私聊 UMO 为目标监听，而不修改原事件。"""
+            __slots__ = ("_real_event", "unified_msg_origin")
+
+            def __init__(self, real_event: AstrMessageEvent, private_umo: str):
+                self._real_event = real_event
+                self.unified_msg_origin = private_umo
+
+            def __getattr__(self, name: str):
+                return getattr(self._real_event, name)
+
+        private_event_proxy = _PrivateSessionEventProxy(event, private_umo)
         try:
-            await sister_waiter(event, session_filter=PrivateSessionFilter())
+            await sister_waiter(private_event_proxy, session_filter=PrivateSessionFilter())
         except TimeoutError:
             await self._send_to_umo(
                 private_umo,
@@ -852,8 +876,6 @@ class Tarot:
         except Exception as e:
             logger.error(f"薇拉模式出错: {e}")
             await self._send_to_umo(private_umo, f"薇拉模式出错: {e}")
-        finally:
-            event.unified_msg_origin = original_umo
 
     async def terminate(self):
         """插件卸载/停用时可选清理运行时生成的旋转图片缓存。"""
@@ -879,7 +901,7 @@ class Tarot:
 
 
 HELP_TEXT = (
-    "赛博塔罗牌 v0.5.0\n"
+    "赛博塔罗牌 v0.5.1\n"
     "[占卜] 随机选取牌阵进行占卜并提供 AI 解析，可附加关键词（如 '占卜 情感'）匹配牌阵\n"
     "[塔罗牌] 得到单张塔罗牌回应及 AI 解析\n"
     "[薇拉/玫瑰小姐/玫瑰姐姐/薇拉姐姐/占卜师] 唤出薇拉姐姐，自动转入私聊进行持续引导对话，聊完后进行专属占卜\n"
@@ -887,7 +909,7 @@ HELP_TEXT = (
 )
 
 
-@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.5.0")
+@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.5.1")
 class TarotPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
