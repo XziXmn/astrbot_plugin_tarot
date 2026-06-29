@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 import PIL.Image
-import PIL.UnidentifiedImageError
+from PIL import UnidentifiedImageError
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
@@ -127,7 +127,7 @@ class Tarot:
                     return False, f"图片文件 {final_path} 不存在！", "", True
                 logger.info(f"使用图片路径: {final_path}")
                 return True, text, final_path, is_upright
-        except PIL.UnidentifiedImageError as e:
+        except UnidentifiedImageError as e:
             logger.error(f"无法识别图片文件 {img_path}: {e}")
             return False, f"无法识别图片文件 {img_path}，请检查资源格式！", "", True
         except OSError as e:
