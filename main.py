@@ -526,6 +526,31 @@ class Tarot:
             logger.error(f"总结对话失败: {e}")
             return "小家伙似乎有些心事，想要向薇拉姐姐寻求指引"
 
+    async def _should_divine(
+        self, event: AstrMessageEvent, history: List[Dict[str, str]]
+    ) -> bool:
+        """根据对话内容判断是否已经可以开始占卜。"""
+        history_text = self._format_history(history)
+        prompt = (
+            "你正在引导一位来访者进行占卜前的倾诉。"
+            "请判断当前对话是否已经收集到足够的信息，可以进入抽牌占卜阶段。\n"
+            "如果来访者已经说出了明确的困惑、问题或想占卜的方向，回复「开始占卜」。\n"
+            "如果来访者还在闲聊、犹豫、抗拒，或信息明显不足，回复「继续聊」。\n"
+            "只回复「开始占卜」或「继续聊」，不要解释。\n\n"
+            f"对话历史：\n{history_text}"
+        )
+        try:
+            decision = await self._call_llm(
+                event,
+                prompt=prompt,
+                system_prompt=PERSONA + " 你擅长判断何时该为来访者揭开命运牌面。",
+            )
+            logger.info(f"是否开始占卜判断结果: {decision}")
+            return "开始占卜" in decision
+        except Exception as e:
+            logger.error(f"判断开始占卜失败: {e}")
+            return False
+
     async def _should_use_formation(
         self, event: AstrMessageEvent, history: List[Dict[str, str]]
     ) -> bool:
@@ -573,14 +598,15 @@ class Tarot:
 
         rules = (
             "📝 规则说明：\n"
-            "• 发送「开始占卜」→ 薇拉姐姐总结并为你抽牌\n"
+            "• 薇拉姐姐会根据聊天内容，自己判断何时为你抽牌\n"
+            "• 等不及的话，发送「开始占卜」→ 立刻总结并抽牌\n"
             "• 发送「退出」→ 离开塔罗馆，不占卜\n"
             "• 5分钟不说话 → 姐姐会以为你睡着了，自动关门哦~"
         )
         yield event.plain_result(rules)
 
         history: List[Dict[str, str]] = []
-        max_rounds = 5
+        max_rounds = 8
         user_id = event.get_sender_id()
 
         def _at_msg(text: str):
@@ -601,9 +627,11 @@ class Tarot:
                 controller.stop()
                 return
 
+            user_rounds = len([h for h in history if h["role"] == "user"])
             should_divine = (
                 user_msg == "开始占卜"
-                or len([h for h in history if h["role"] == "user"]) >= max_rounds
+                or user_rounds >= max_rounds
+                or (user_rounds >= 2 and await self._should_divine(event, history))
             )
 
             if should_divine:
@@ -674,7 +702,7 @@ class Tarot:
 
 
 HELP_TEXT = (
-    "赛博塔罗牌 v0.4.4\n"
+    "赛博塔罗牌 v0.4.5\n"
     "[占卜] 随机选取牌阵进行占卜并提供 AI 解析，可附加关键词（如 '占卜 情感'）匹配牌阵\n"
     "[塔罗牌] 得到单张塔罗牌回应及 AI 解析\n"
     "[薇拉/玫瑰小姐/玫瑰姐姐/薇拉姐姐/占卜师] 唤出薇拉姐姐，进入持续引导对话，聊完后进行专属占卜\n"
@@ -682,7 +710,7 @@ HELP_TEXT = (
 )
 
 
-@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.4.4")
+@register("tarot", "XziXmn", "赛博塔罗牌占卜插件", "0.4.5")
 class TarotPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
